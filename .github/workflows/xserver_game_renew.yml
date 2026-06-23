@@ -1,0 +1,115 @@
+name: XServer-Game-Renew
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "起始UTC时间（格式：YYYY-MM-DD HH:MM）"
+        required: false
+        default: "2026-06-23 00:00"
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 拉取私库脚本
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/XServer-Game-Renew-Private
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private
+
+      - name: 📂 复制脚本到工作目录
+        run: cp private/xserver_game_renew.py xserver_game_renew.py
+
+      - name: 🐍 安装 Python 依赖
+        run: pip install requests --quiet
+
+      # =========================
+      # ⏱️ 稳定时间控制（核心）
+      # =========================
+      - name: ⏱️ 执行频率控制
+        id: check_time
+        shell: bash
+        run: |
+          echo "==== 时间判断开始 ===="
+
+          # 1️⃣ 获取输入时间
+          START_INPUT="${{ github.event.inputs.start_date }}"
+          if [ -z "$START_INPUT" ]; then
+            START_INPUT="2026-06-23 00:00"
+          fi
+
+          echo "起始时间: $START_INPUT"
+          echo "当前UTC: $(date -u)"
+
+          # 2️⃣ 强制 UTC 解析（避免时区坑）
+          START_TIME=$(date -u -d "$START_INPUT UTC" +%s 2>/dev/null || echo 0)
+          NOW=$(date -u +%s)
+
+          # 3️⃣ 安全兜底
+          if [ "$START_TIME" -eq 0 ]; then
+            echo "❌ 时间解析失败，默认不执行"
+            echo "run=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # 4️⃣ 计算天数
+          DIFF=$((NOW - START_TIME))
+          DAYS=$((DIFF / 86400))
+
+          echo "已过去秒数: $DIFF"
+          echo "已过去天数: $DAYS"
+
+          # 5️⃣ 未到开始时间
+          if [ "$DIFF" -lt 0 ]; then
+            echo "⏭️ 未到起始时间"
+            echo "run=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # 6️⃣ 隔天执行核心逻辑
+          if (( DAYS % 2 != 0 )); then
+            echo "⏭️ 非执行日（隔天规则）"
+            echo "run=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "✅ 执行日"
+          echo "run=true" >> $GITHUB_OUTPUT
+
+      # =========================
+      # 🛡️ GOST代理（仅执行日）
+      # =========================
+      - name: 🛡️ 启动 GOST 代理
+        if: ${{ steps.check_time.outputs.run == 'true' }}
+        env:
+          GOST_PROXY: ${{ secrets.GOST_PROXY }}
+        run: |
+          VERSION=$(curl -s https://api.github.com/repos/ginuerzh/gost/releases/latest | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v')
+
+          echo "GOST版本: $VERSION"
+
+          wget -q "https://github.com/ginuerzh/gost/releases/download/v${VERSION}/gost_${VERSION}_linux_amd64.tar.gz"
+          tar -xzf "gost_${VERSION}_linux_amd64.tar.gz"
+          chmod +x gost
+
+          nohup ./gost -L http://:8080 -F "$GOST_PROXY" > gost.log 2>&1 &
+          sleep 3
+
+          echo "代理测试:"
+          curl -s -x http://127.0.0.1:8080 https://api.ipify.org
+
+      # =========================
+      # 🔧 执行续期
+      # =========================
+      - name: 🔧 执行续期脚本
+        if: ${{ steps.check_time.outputs.run == 'true' }}
+        env:
+          XSERVER_GAME_ACCOUNT: ${{ secrets.XSERVER_GAME_ACCOUNT }}
+          GOST_PROXY: ${{ secrets.GOST_PROXY }}
+          TG_BOT: ${{ secrets.TG_BOT }}
+          SERVER_ID: ${{ secrets.SERVER_ID }}
+        run: python3 xserver_game_renew.py
