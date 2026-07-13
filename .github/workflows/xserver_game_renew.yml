@@ -14,7 +14,7 @@ jobs:
       - name: 📥 拉取私库脚本
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/XServer-Game-Renew-Private-287
+          repository: ${{ github.repository_owner }}/XServer-Game-Renew-Private
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private
 
