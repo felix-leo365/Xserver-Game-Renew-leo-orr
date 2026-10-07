@@ -22,7 +22,10 @@ jobs:
         run: cp private/xserver_game_renew.py xserver_game_renew.py
 
       - name: 🐍 安装 Python 依赖
-        run: pip install requests --quiet
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xdotool
+          pip install requests seleniumbase --quiet
 
       - name: 🛡️ 启动 GOST 代理转发
         if: ${{ env.GOST_PROXY != '' }}
